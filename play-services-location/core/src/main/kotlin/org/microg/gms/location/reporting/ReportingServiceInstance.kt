@@ -14,16 +14,22 @@ import org.microg.gms.common.GooglePackagePermission
 import org.microg.gms.common.PackageUtils
 import org.microg.gms.utils.warnOnTransactionIssues
 
+/**
+ * https://userlocation.googleapis.com/userlocation.UserLocationReportingService/GetApiSettings
+ * Follow-up: Fill ReportingState based on AccountConfig returned by the interface and persistence processing
+ */
+
 //import com.google.android.gms.location.places.PlaceReport;
 class ReportingServiceInstance(private val context: Context, private val packageName: String) : IReportingService.Stub() {
 
     override fun getReportingState(account: Account): ReportingState {
         Log.d(TAG, "getReportingState")
-        val state = ReportingState()
-        if (PackageUtils.callerHasGooglePackagePermission(context, GooglePackagePermission.REPORTING)) {
-            state.deviceTag = 0
+        val (deviceTag, allowed) =  if (PackageUtils.callerHasGooglePackagePermission(context, GooglePackagePermission.REPORTING)) {
+            Pair(0, true)
+        } else {
+            Pair(null, false)
         }
-        return state
+        return ReportingState(-1, -1, allowed, false, 1, 1, deviceTag, false, true)
     }
 
     override fun tryOptInAccount(account: Account): Int {

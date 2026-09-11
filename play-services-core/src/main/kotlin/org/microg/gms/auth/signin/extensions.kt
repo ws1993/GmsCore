@@ -25,12 +25,14 @@ import kotlinx.coroutines.withContext
 import org.microg.gms.auth.AuthManager
 import org.microg.gms.auth.ConsentCookiesResponse
 import org.microg.gms.auth.ConsentUrlResponse
+import org.microg.gms.auth.NonceWrapper
 import org.microg.gms.auth.RequestOptions
 import org.microg.gms.auth.consent.CONSENT_KEY_COOKIE
 import org.microg.gms.auth.consent.CONSENT_MESSENGER
 import org.microg.gms.auth.consent.CONSENT_RESULT
 import org.microg.gms.auth.consent.CONSENT_URL
 import org.microg.gms.auth.consent.ConsentSignInActivity
+import org.microg.gms.games.GamesConfigurationService
 import org.microg.gms.people.DatabaseHelper
 import org.microg.gms.utils.toHexString
 import java.security.MessageDigest
@@ -58,6 +60,9 @@ val GoogleSignInOptions.includeProfile
 val GoogleSignInOptions.includeUnacceptableScope
     get() = scopeUris.any { it.scopeUri !in ACCEPTABLE_SCOPES }
 
+val GoogleSignInOptions.includeGame
+    get() = scopeUris.any { it.scopeUri.contains(Scopes.GAMES) }
+
 val consentRequestOptions: String?
     get() = runCatching {
         val sessionId = Base64.encodeToString(ByteArray(16).also { SecureRandom().nextBytes(it) }, Base64.NO_WRAP).trim()
@@ -65,45 +70,54 @@ val consentRequestOptions: String?
         Base64.encodeToString(requestOptions.encode(), Base64.DEFAULT)
     }.getOrNull()
 
-fun getOAuthManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account): AuthManager {
-    val scopes = options?.scopes.orEmpty().sortedBy { it.scopeUri }
-    return AuthManager(context, account.name, packageName, "oauth2:${scopes.joinToString(" ")}")
+fun getOAuthManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account, includeGrantedScopes: String? = null): AuthManager {
+    val scopes = options?.scopes.orEmpty().sortedBy { it.scopeUri }.toMutableList().apply {
+        if (options?.includeGame == true) { add(Scope(Scopes.GAMES_LITE)) }
+    }
+    return AuthManager(context, account.name, packageName, "oauth2:${scopes.joinToString(" ")}").also {
+        it.includeGrantedScopes = includeGrantedScopes ?: "1"
+    }
 }
 
 fun getCookiesManager(context: Context, packageName: String, account: Account): AuthManager {
     return AuthManager(context, account.name, packageName, "weblogin:url=https://accounts.google.com")
 }
 
-fun getIdTokenManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account): AuthManager? {
+fun getIdTokenManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account, includeGrantedScopes: String? = null): AuthManager? {
     if (options?.isIdTokenRequested != true || options.serverClientId == null) return null
 
     val idTokenManager = AuthManager(context, account.name, packageName, "audience:server:client_id:${options.serverClientId}")
     idTokenManager.includeEmail = if (options.includeEmail) "1" else "0"
     idTokenManager.includeProfile = if (options.includeProfile) "1" else "0"
+    idTokenManager.includeGrantedScopes = includeGrantedScopes ?: "0"
     return idTokenManager
 }
 
-fun getServerAuthTokenManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account): AuthManager? {
+fun getServerAuthTokenManager(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account, includeGrantedScopes: String? = null): AuthManager? {
     if (options?.isServerAuthCodeRequested != true || options.serverClientId == null) return null
 
     val serverAuthTokenManager = AuthManager(context, account.name, packageName, "oauth2:server:client_id:${options.serverClientId}:api_scope:${options.scopeUris.joinToString(" ")}")
     serverAuthTokenManager.includeEmail = if (options.includeEmail) "1" else "0"
     serverAuthTokenManager.includeProfile = if (options.includeProfile) "1" else "0"
-    serverAuthTokenManager.setOauth2Prompt("auto")
+    // authorization codes must be single-use
+    serverAuthTokenManager.forceRefreshToken = true
+    serverAuthTokenManager.includeGrantedScopes = includeGrantedScopes ?: "1"
+    serverAuthTokenManager.setOauth2Prompt(if (options.isForceCodeForRefreshToken) "consent" else "auto")
     serverAuthTokenManager.setItCaveatTypes("2")
     return serverAuthTokenManager
 }
 
-suspend fun checkAppAuthStatus(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account): Boolean {
-    val authManager = getOAuthManager(context, packageName, options, account)
+suspend fun checkAccountAuthStatus(context: Context, packageName: String, scopeList: List<Scope>?, account: Account): Boolean {
+    val scopes = scopeList.orEmpty().sortedBy { it.scopeUri }
+    val authManager = AuthManager(context, account.name, packageName, "oauth2:${scopes.joinToString(" ")}")
     authManager.ignoreStoredPermission = true
     return withContext(Dispatchers.IO) { authManager.requestAuth(true) }.auth != null
 }
 
-suspend fun performSignIn(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account, permitted: Boolean = false): GoogleSignInAccount? {
-    val authManager = getOAuthManager(context, packageName, options, account)
-    val authResponse = withContext(Dispatchers.IO) {
-        if (options?.includeUnacceptableScope == true) {
+suspend fun performSignIn(context: Context, packageName: String, options: GoogleSignInOptions?, account: Account, permitted: Boolean = false, idNonce: String? = null, includeGrantedScopes: String? = null): Pair<String?, GoogleSignInAccount?> {
+    val authManager = getOAuthManager(context, packageName, options, account, includeGrantedScopes)
+    var authResponse = withContext(Dispatchers.IO) {
+        if (options?.includeUnacceptableScope == true || !permitted) {
             authManager.setTokenRequestOptions(consentRequestOptions)
         }
         if (permitted) authManager.isPermitted = true
@@ -112,18 +126,28 @@ suspend fun performSignIn(context: Context, packageName: String, options: Google
     var consentResult:String ?= null
     if ("remote_consent" == authResponse.issueAdvice && authResponse.resolutionDataBase64 != null){
         consentResult = performConsentView(context, packageName, account, authResponse.resolutionDataBase64)
-        if (consentResult == null) return null
-    } else {
-        if (authResponse.auth == null) return null
+        if (consentResult == null) return Pair(null, null)
+        authResponse = authManager.let {
+            it.putDynamicFiled(CONSENT_RESULT, consentResult)
+            withContext(Dispatchers.IO) { it.requestAuth(true) }
+        }
     }
+    if (authResponse.auth == null) return Pair(null, null)
     Log.d(TAG, "id token requested: ${options?.isIdTokenRequested == true}, serverClientId = ${options?.serverClientId}, permitted = ${authManager.isPermitted}")
-    val idTokenResponse = getIdTokenManager(context, packageName, options, account)?.let {
-        it.isPermitted = authManager.isPermitted
+    val idTokenResponse = getIdTokenManager(context, packageName, options, account, includeGrantedScopes)?.let {
+        if (idNonce != null) {
+            it.setTokenRequestOptions(Base64.encodeToString(RequestOptions.build {
+                remote = 1
+                version = 6
+                nonceWrapper = NonceWrapper.build { nonce = idNonce }
+            }.encode(), Base64.DEFAULT))
+        }
+        it.isPermitted = authResponse.auth != null
         consentResult?.let { result -> it.putDynamicFiled(CONSENT_RESULT, result) }
         withContext(Dispatchers.IO) { it.requestAuth(true) }
     }
-    val serverAuthTokenResponse = getServerAuthTokenManager(context, packageName, options, account)?.let {
-        it.isPermitted = authManager.isPermitted
+    val serverAuthTokenResponse = getServerAuthTokenManager(context, packageName, options, account, includeGrantedScopes)?.let {
+        it.isPermitted = authResponse.auth != null
         consentResult?.let { result -> it.putDynamicFiled(CONSENT_RESULT, result) }
         withContext(Dispatchers.IO) { it.requestAuth(true) }
     }
@@ -133,7 +157,8 @@ suspend fun performSignIn(context: Context, packageName: String, options: Google
     val serverAuthCode: String? = if (options?.isServerAuthCodeRequested == true) serverAuthTokenResponse?.auth else null
     val expirationTime = min(authResponse.expiry.orMaxIfNegative(), idTokenResponse?.expiry.orMaxIfNegative())
     val obfuscatedIdentifier: String = MessageDigest.getInstance("MD5").digest("$googleUserId:$packageName".encodeToByteArray()).toHexString().uppercase()
-    val grantedScopes = authResponse.grantedScopes?.split(" ").orEmpty().map { Scope(it) }.toSet()
+    val grantedScopeList = authResponse.grantedScopes ?: idTokenResponse?.grantedScopes ?: serverAuthTokenResponse?.grantedScopes
+    val grantedScopes = grantedScopeList?.split(" ")?.map { Scope(it) }?.toSet() ?: options?.scopeUris?.toSet() ?: emptySet()
     val (givenName, familyName, displayName, photoUrl) = if (options?.includeProfile == true) {
         val databaseHelper = DatabaseHelper(context)
         val cursor = databaseHelper.getOwner(account.name)
@@ -151,8 +176,11 @@ suspend fun performSignIn(context: Context, packageName: String, options: Google
             databaseHelper.close()
         }
     } else listOf(null, null, null, null)
-    SignInConfigurationService.setDefaultSignInInfo(context, packageName, account, options?.toJson())
-    return GoogleSignInAccount(
+    if (options?.includeGame == true) {
+        GamesConfigurationService.setDefaultAccount(context, packageName, account)
+    }
+    SignInConfigurationService.setAuthInfo(context, packageName, account, options?.toJson())
+    val googleSignInAccount = GoogleSignInAccount(
         id,
         tokenId,
         account.name,
@@ -165,6 +193,7 @@ suspend fun performSignIn(context: Context, packageName: String, options: Google
         givenName,
         familyName
     )
+    return Pair(authResponse.auth, googleSignInAccount)
 }
 
 suspend fun performConsentView(context: Context, packageName: String, account: Account, dataBase64: String): String? {
@@ -183,12 +212,13 @@ suspend fun performConsentView(context: Context, packageName: String, account: A
     return withContext(Dispatchers.IO) {
         val deferred = CompletableDeferred<String?>()
         val intent = Intent(context, ConsentSignInActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
             putExtra(CONSENT_URL, consentResponse.consentUrl)
             putExtra(CONSENT_MESSENGER, Messenger(object : Handler(Looper.getMainLooper()) {
                 override fun handleMessage(msg: Message) {
-                    val content = msg.obj
-                    Log.d(TAG, "performConsentView: ConsentSignInActivity deferred ")
-                    deferred.complete(content?.toString())
+                    val content = msg.data.getString(CONSENT_RESULT)
+                    Log.d(TAG, "performConsentView: ConsentSignInActivity deferred content: $content")
+                    deferred.complete(content)
                 }
             }))
             cookies.forEachIndexed { index, cookie ->

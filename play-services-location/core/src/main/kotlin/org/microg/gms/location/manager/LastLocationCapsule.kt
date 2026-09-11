@@ -37,7 +37,7 @@ class LastLocationCapsule(private val context: Context) {
     private val file: File
         get() = context.getFileStreamPath(FILE_NAME)
 
-    fun getLocation(effectiveGranularity: @Granularity Int, maxUpdateAgeMillis: Long): Location? {
+    fun getLocation(effectiveGranularity: @Granularity Int, maxUpdateAgeMillis: Long = Long.MAX_VALUE): Location? {
         val location = when (effectiveGranularity) {
             GRANULARITY_COARSE -> lastCoarseLocationTimeCoarsed
             GRANULARITY_FINE -> lastCoarseLocation
@@ -66,14 +66,21 @@ class LastLocationCapsule(private val context: Context) {
     fun updateCoarseLocation(location: Location) {
         location.elapsedRealtimeNanos = min(location.elapsedRealtimeNanos, SystemClock.elapsedRealtimeNanos())
         location.time = min(location.time, System.currentTimeMillis())
-        if (lastCoarseLocation != null && lastCoarseLocation!!.elapsedMillis + EXTENSION_CLIFF > location.elapsedMillis) {
-            if (!location.hasSpeed()) {
-                location.speed = lastCoarseLocation!!.distanceTo(location) / ((location.elapsedMillis - lastCoarseLocation!!.elapsedMillis) / 1000)
-                LocationCompat.setSpeedAccuracyMetersPerSecond(location, location.speed)
-            }
-            if (!location.hasBearing() && location.speed > 0.5f) {
-                location.bearing = lastCoarseLocation!!.bearingTo(location)
-                LocationCompat.setBearingAccuracyDegrees(location, 180.0f)
+        val previousLocation = lastCoarseLocation
+        if (previousLocation != null) {
+            val elapsedMillis = location.elapsedMillis - previousLocation.elapsedMillis
+            if (elapsedMillis in 1..<EXTENSION_CLIFF) {
+                if (!location.hasSpeed()) {
+                    val speed = previousLocation.distanceTo(location) * 1000f / elapsedMillis
+                    if (speed.isFinite()) {
+                        location.speed = speed
+                        LocationCompat.setSpeedAccuracyMetersPerSecond(location, speed)
+                    }
+                }
+                if (!location.hasBearing() && location.hasSpeed() && location.speed > 0.5f) {
+                    location.bearing = previousLocation.bearingTo(location)
+                    LocationCompat.setBearingAccuracyDegrees(location, 180.0f)
+                }
             }
         }
         lastCoarseLocation = newest(lastCoarseLocation, location)

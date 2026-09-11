@@ -6,10 +6,13 @@ package org.microg.gms.fido.core.protocol
 
 import android.util.Log
 import com.google.android.gms.fido.common.Transport
+import com.google.android.gms.fido.fido2.api.common.Algorithm
+import com.google.android.gms.fido.fido2.api.common.EC2Algorithm
 import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialDescriptor
 import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialParameters
 import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRpEntity
 import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialUserEntity
+import com.google.android.gms.fido.fido2.api.common.RSAAlgorithm
 import com.upokecenter.cbor.CBORObject
 
 private const val TAG = "FidoCbor"
@@ -41,11 +44,17 @@ fun PublicKeyCredentialRpEntity.encodeAsCbor() = CBORObject.NewMap().apply {
     if (!icon.isNullOrBlank()) set("icon", icon!!.encodeAsCbor())
 }
 
+fun CBORObject.decodeAsPublicKeyCredentialRpEntity() = PublicKeyCredentialRpEntity(
+    get("id")?.AsString() ?: "".also { Log.w(TAG, "id was not present") },
+    get("name")?.AsString() ?: "".also { Log.w(TAG, "name was not present") },
+    get("icon")?.AsString() ?: "".also { Log.w(TAG, "icon was not present") },
+)
+
 fun PublicKeyCredentialUserEntity.encodeAsCbor() = CBORObject.NewMap().apply {
     set("id", id.encodeAsCbor())
-    if (!name.isNullOrBlank()) set("name", name.encodeAsCbor())
+    set("name", name.encodeAsCbor())
     if (!icon.isNullOrBlank()) set("icon", icon!!.encodeAsCbor())
-    if (!displayName.isNullOrBlank()) set("displayName", displayName.encodeAsCbor())
+    set("displayName", displayName.encodeAsCbor())
 }
 
 fun CBORObject.decodeAsPublicKeyCredentialUserEntity() = PublicKeyCredentialUserEntity(
@@ -54,6 +63,12 @@ fun CBORObject.decodeAsPublicKeyCredentialUserEntity() = PublicKeyCredentialUser
     get("icon")?.AsString(),
     get("displayName")?.AsString() ?: "".also { Log.w(TAG, "displayName was not present") }
 )
+
+fun getAlgorithm(algorithmInt: Int): Algorithm {
+    return EC2Algorithm.entries.firstOrNull { it.algoValue == algorithmInt }
+        ?: RSAAlgorithm.entries.firstOrNull { it.algoValue == algorithmInt }
+        ?: Algorithm { algorithmInt }
+}
 
 fun PublicKeyCredentialParameters.encodeAsCbor() = CBORObject.NewMap().apply {
     set("alg", algorithmIdAsInteger.encodeAsCbor())

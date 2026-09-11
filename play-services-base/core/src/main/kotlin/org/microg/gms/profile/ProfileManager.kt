@@ -34,7 +34,7 @@ object ProfileManager {
 
     private fun getUserProfileFile(context: Context): File = File(context.filesDir, "device_profile.xml")
     private fun getSystemProfileFile(context: Context): File = File("/system/etc/microg_device_profile.xml")
-    private fun getProfileResId(context: Context, profile: String) = context.resources.getIdentifier("${context.packageName}:xml/profile_$profile".toLowerCase(Locale.US), null, null)
+    private fun getProfileResId(context: Context, profile: String) = context.resources.getIdentifier("${context.packageName}:xml/profile_$profile".lowercase(Locale.US), null, null)
 
     fun getConfiguredProfile(context: Context): String = SettingsContract.getSettings(context, Profile.getContentUri(context), arrayOf(Profile.PROFILE)) { it.getString(0) } ?: PROFILE_AUTO
 
@@ -104,7 +104,7 @@ object ProfileManager {
     private fun getProfileData(context: Context, profile: String, realData: Map<String, String>): Map<String, String> {
         try {
             if (profile in listOf(PROFILE_REAL, PROFILE_NATIVE)) return realData
-            if (profile != PROFILE_USER && getProfileResId(context, profile) == 0) return realData
+            if (profile !in listOf(PROFILE_USER, PROFILE_SYSTEM) && getProfileResId(context, profile) == 0) return realData
             val resultData = mutableMapOf<String, String>()
             resultData.putAll(realData)
             val parser = getProfileXml(context, profile)
@@ -325,8 +325,10 @@ object ProfileManager {
                 Log.v(TAG, "<data key=\"$key\" value=\"$value\" />")
             }
         }
-        applyProfileData(profileData)
-        activeProfile = PROFILE_REMOTE
+        if (profileData.isNotEmpty()) {
+            applyProfileData(profileData)
+            activeProfile = PROFILE_REMOTE
+        }
     }
 
     fun getProfileName(context: Context, profile: String): String? = getProfileName { getProfileXml(context, profile) }
@@ -375,6 +377,11 @@ object ProfileManager {
             Log.w(TAG, e)
             return false
         }
+    }
+
+    @JvmStatic
+    fun resetActiveProfile() {
+        activeProfile = null
     }
 
     @JvmStatic

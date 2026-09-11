@@ -43,6 +43,8 @@ public class BeginSignInRequest extends AbstractSafeParcelable {
     private final PasskeysRequestOptions passkeysRequestOptions;
     @Field(value = 7, getterName = "getPasskeyJsonRequestOptions")
     private final PasskeyJsonRequestOptions passkeyJsonRequestOptions;
+    @Field(value = 8, getterName = "isPreferImmediatelyAvailableCredentials")
+    private final boolean preferImmediatelyAvailableCredentials;
 
     @NonNull
     @Override
@@ -55,11 +57,12 @@ public class BeginSignInRequest extends AbstractSafeParcelable {
                 .field("theme", theme)
                 .field("PasskeysRequestOptions", passkeysRequestOptions)
                 .field("PasskeyJsonRequestOptions", passkeyJsonRequestOptions)
+                .field("preferImmediatelyAvailableCredentials", preferImmediatelyAvailableCredentials)
                 .end();
     }
 
     @Constructor
-    BeginSignInRequest(@Param(1) PasswordRequestOptions passwordRequestOptions, @Param(2) GoogleIdTokenRequestOptions googleIdTokenRequestOptions, @Param(3) String sessionId, @Param(4) boolean autoSelectEnabled, @Param(5) int theme, @Param(6) PasskeysRequestOptions passkeysRequestOptions, @Param(7) PasskeyJsonRequestOptions passkeyJsonRequestOptions) {
+    BeginSignInRequest(@Param(1) PasswordRequestOptions passwordRequestOptions, @Param(2) GoogleIdTokenRequestOptions googleIdTokenRequestOptions, @Param(3) String sessionId, @Param(4) boolean autoSelectEnabled, @Param(5) int theme, @Param(6) PasskeysRequestOptions passkeysRequestOptions, @Param(7) PasskeyJsonRequestOptions passkeyJsonRequestOptions, @Param(8) boolean preferImmediatelyAvailableCredentials) {
         this.passwordRequestOptions = passwordRequestOptions;
         this.googleIdTokenRequestOptions = googleIdTokenRequestOptions;
         this.sessionId = sessionId;
@@ -67,6 +70,7 @@ public class BeginSignInRequest extends AbstractSafeParcelable {
         this.theme = theme;
         this.passkeysRequestOptions = passkeysRequestOptions;
         this.passkeyJsonRequestOptions = passkeyJsonRequestOptions;
+        this.preferImmediatelyAvailableCredentials = preferImmediatelyAvailableCredentials;
     }
 
     @NonNull
@@ -107,8 +111,136 @@ public class BeginSignInRequest extends AbstractSafeParcelable {
         return autoSelectEnabled;
     }
 
-    public static class Builder {
+    public boolean isPreferImmediatelyAvailableCredentials() {
+        return preferImmediatelyAvailableCredentials;
+    }
 
+    /**
+     * Builder for {@link BeginSignInRequest}.
+     */
+    public static class Builder {
+        private PasswordRequestOptions passwordRequestOptions;
+        private GoogleIdTokenRequestOptions googleIdTokenRequestOptions;
+        private String sessionId;
+        private boolean autoSelectEnabled;
+        private int theme;
+        private PasskeysRequestOptions passkeysRequestOptions;
+        private PasskeyJsonRequestOptions passkeyJsonRequestOptions;
+        private boolean preferImmediatelyAvailableCredentials;
+
+        /**
+         * Returns the built {@link BeginSignInRequest}.
+         */
+        @NonNull
+        public BeginSignInRequest build() {
+            return new BeginSignInRequest(
+                passwordRequestOptions,
+                googleIdTokenRequestOptions,
+                sessionId,
+                autoSelectEnabled,
+                theme,
+                passkeysRequestOptions,
+                passkeyJsonRequestOptions,
+                preferImmediatelyAvailableCredentials
+            );
+        }
+
+        /**
+         * Sets whether to enable auto-select for the credential.
+         * <p>
+         * If enabled and only one credential is available, it will be automatically selected.
+         *
+         * @param autoSelectEnabled whether to enable auto-select
+         */
+        @NonNull
+        public Builder setAutoSelectEnabled(boolean autoSelectEnabled) {
+            this.autoSelectEnabled = autoSelectEnabled;
+            return this;
+        }
+
+        /**
+         * Sets options for requesting Google ID token-backed credentials.
+         *
+         * @param googleIdTokenRequestOptions the Google ID token request options
+         */
+        @NonNull
+        public Builder setGoogleIdTokenRequestOptions(@Nullable GoogleIdTokenRequestOptions googleIdTokenRequestOptions) {
+            this.googleIdTokenRequestOptions = googleIdTokenRequestOptions;
+            return this;
+        }
+
+        /**
+         * Sets options for requesting passkey credentials using JSON format.
+         *
+         * @param passkeyJsonRequestOptions the passkey JSON request options
+         */
+        @NonNull
+        public Builder setPasskeyJsonRequestOptions(@Nullable PasskeyJsonRequestOptions passkeyJsonRequestOptions) {
+            this.passkeyJsonRequestOptions = passkeyJsonRequestOptions;
+            return this;
+        }
+
+        /**
+         * Sets options for requesting passkey credentials.
+         *
+         * @param passkeysRequestOptions the passkey request options
+         * @deprecated Use {@link #setPasskeyJsonRequestOptions(PasskeyJsonRequestOptions)} instead
+         */
+        @Deprecated
+        @NonNull
+        public Builder setPasskeysRequestOptions(@Nullable PasskeysRequestOptions passkeysRequestOptions) {
+            this.passkeysRequestOptions = passkeysRequestOptions;
+            return this;
+        }
+
+        /**
+         * Sets options for requesting password-backed credentials.
+         *
+         * @param passwordRequestOptions the password request options
+         */
+        @NonNull
+        public Builder setPasswordRequestOptions(@Nullable PasswordRequestOptions passwordRequestOptions) {
+            this.passwordRequestOptions = passwordRequestOptions;
+            return this;
+        }
+
+        /**
+         * Sets whether to prefer immediately available credentials.
+         * <p>
+         * If true, the API will only return credentials that are immediately available
+         * without requiring user interaction.
+         *
+         * @param preferImmediatelyAvailableCredentials whether to prefer immediately available credentials
+         */
+        @NonNull
+        public Builder setPreferImmediatelyAvailableCredentials(boolean preferImmediatelyAvailableCredentials) {
+            this.preferImmediatelyAvailableCredentials = preferImmediatelyAvailableCredentials;
+            return this;
+        }
+
+        /**
+         * Sets the session ID for this sign-in request.
+         *
+         * @param sessionId the session ID
+         */
+        @Hide
+        @NonNull
+        public Builder setSessionId(@Nullable String sessionId) {
+            this.sessionId = sessionId;
+            return this;
+        }
+
+        /**
+         * Sets the theme for the sign-in UI.
+         *
+         * @param theme the theme resource ID
+         */
+        @Hide
+        @NonNull
+        public Builder setTheme(int theme) {
+            this.theme = theme;
+            return this;
+        }
     }
 
     /**

@@ -1,4 +1,4 @@
-/*
+﻿/*
  * SPDX-FileCopyrightText: 2023 microG Project Team
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -45,15 +45,12 @@ class GamesSignInActivity : AppCompatActivity() {
         window.setGravity(popupGravity)
         startActivityForResult(Intent(this, AuthSignInActivity::class.java).apply {
             Log.d(TAG, "Sign in for $gamePackageName account:${account?.name} scopes:$scopes")
-            putExtra("config", SignInConfiguration().apply {
-                packageName = gamePackageName
-                options = GoogleSignInOptions.Builder().apply {
-                    for (scope in scopes) {
-                        requestScopes(scope)
-                    }
-                    account?.name?.takeIf { it != AuthConstants.DEFAULT_ACCOUNT }?.let { setAccountName(it) }
-                }.build()
-            })
+            putExtra("config", SignInConfiguration(gamePackageName!!, GoogleSignInOptions.Builder().apply {
+                for (scope in scopes) {
+                    requestScopes(scope)
+                }
+                account?.name?.takeIf { it != AuthConstants.DEFAULT_ACCOUNT }?.let { setAccountName(it) }
+            }.build()))
             Log.d(TAG, "Redirect to GOOGLE_SIGN_IN using $this")
         }, REQUEST_CODE_GOOGLE_SIGN_IN)
     }
@@ -61,6 +58,9 @@ class GamesSignInActivity : AppCompatActivity() {
     private suspend fun signIn(account: Account) {
         Log.d(TAG, "Sign in as ${account.name}")
         if (performGamesSignIn(this, gamePackageName!!, account, permitted = true, scopes = scopes)) {
+            if (GameProfileSettings.getAllowUploadGamePlayed(this)) {
+                runCatching { notifyGamePlayed(this, gamePackageName!!, account) }
+            }
             GamesConfigurationService.setDefaultAccount(this, gamePackageName, account)
         }
         setResult(RESULT_OK, Intent().apply {
@@ -78,7 +78,12 @@ class GamesSignInActivity : AppCompatActivity() {
                         ?.getParcelable<GoogleSignInAccount>("googleSignInAccount")?.account
                 if (account != null) {
                     lifecycleScope.launchWhenStarted {
-                        signIn(account)
+                        try {
+                            signIn(account)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "signIn failed", e)
+                            finish()
+                        }
                     }
                     return
                 }

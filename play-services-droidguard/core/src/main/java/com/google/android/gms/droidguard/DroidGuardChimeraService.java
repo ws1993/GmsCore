@@ -15,11 +15,15 @@ import androidx.annotation.Nullable;
 
 import com.google.android.gms.framework.tracing.wrapper.TracingIntentService;
 
+import org.microg.gms.droidguard.core.DroidGuardPreferences;
 import org.microg.gms.droidguard.core.DroidGuardServiceBroker;
 import org.microg.gms.droidguard.GuardCallback;
-import org.microg.gms.droidguard.core.HandleProxyFactory;
+import org.microg.gms.droidguard.core.NetworkHandleProxyFactory;
 import org.microg.gms.droidguard.PingData;
 import org.microg.gms.droidguard.Request;
+import org.microg.gms.droidguard.core.HardwareAttestationBlockingProvider;
+import org.microg.gms.droidguard.core.SerialUnflaky;
+import org.microg.gms.droidguard.core.ServiceCallProxy;
 
 import java.util.Collections;
 import java.util.concurrent.Executor;
@@ -30,7 +34,7 @@ import java.util.concurrent.TimeUnit;
 public class DroidGuardChimeraService extends TracingIntentService {
     public static final Object a = new Object();
     // factory
-    public HandleProxyFactory b;
+    public NetworkHandleProxyFactory b;
     // widevine
     public Object c;
     // executor
@@ -51,7 +55,7 @@ public class DroidGuardChimeraService extends TracingIntentService {
         setIntentRedelivery(true);
     }
 
-    public DroidGuardChimeraService(HandleProxyFactory factory, Object ping, Object database) {
+    public DroidGuardChimeraService(NetworkHandleProxyFactory factory, Object ping, Object database) {
         super("DG");
         setIntentRedelivery(true);
         this.b = factory;
@@ -112,6 +116,10 @@ public class DroidGuardChimeraService extends TracingIntentService {
     @Override
     public final IBinder onBind(Intent intent) {
         if (intent != null && intent.getAction() != null && intent.getAction().equals("com.google.android.gms.droidguard.service.START")) {
+            HardwareAttestationBlockingProvider.ensureEnabled(DroidGuardPreferences.isHardwareAttestationBlocked(this));
+            SerialUnflaky.INSTANCE.fetch();
+            ServiceCallProxy.INSTANCE.maySetBlockDumpForService(this, "SurfaceFlinger");
+            ServiceCallProxy.INSTANCE.maySetBlockDumpForService(this, "thermalservice");
             return new DroidGuardServiceBroker(this);
         }
         return null;
@@ -120,11 +128,15 @@ public class DroidGuardChimeraService extends TracingIntentService {
     @Override
     public void onCreate() {
         this.e = new Object();
-        this.b = new HandleProxyFactory(this);
+        this.b = new NetworkHandleProxyFactory(this);
         this.g = new Object();
         this.h = new Handler();
         this.c = new Object();
         this.d = new ThreadPoolExecutor(1, 1, 0, TimeUnit.NANOSECONDS, new LinkedBlockingQueue<>(1), new ThreadPoolExecutor.DiscardPolicy());
+        HardwareAttestationBlockingProvider.ensureEnabled(DroidGuardPreferences.isHardwareAttestationBlocked(this));
+        SerialUnflaky.INSTANCE.fetch();
+        ServiceCallProxy.INSTANCE.maySetBlockDumpForService(this, "SurfaceFlinger");
+        ServiceCallProxy.INSTANCE.maySetBlockDumpForService(this, "thermalservice");
         super.onCreate();
     }
 
